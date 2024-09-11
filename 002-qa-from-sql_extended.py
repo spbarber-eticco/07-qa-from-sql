@@ -21,56 +21,60 @@ llm = ChatOpenAI(model="gpt-4o-mini")
 sqlite_db_path = "data/street_tree_db.sqlite"
 db = SQLDatabase.from_uri(f"sqlite:///{sqlite_db_path}")
 
+def extract_sql_query(response):
+    if isinstance(response, str):
+        # Eliminar "SQLQuery:" si está presente
+        response = re.sub(r'^SQLQuery:\s*', '', response, flags=re.IGNORECASE)
+        
+        # Eliminar backticks de markdown y la palabra "sql" si están presentes
+        response = re.sub(r'```sql\s*(.*?)\s*```', r'\1', response, flags=re.DOTALL | re.IGNORECASE)
+        
+        # Buscar una consulta SQL válida
+        sql_match = re.search(r'\b(SELECT\s+.*?;)', response, re.DOTALL | re.IGNORECASE)
+        if sql_match:
+            return sql_match.group(1).strip()
+    return response  # Si no se encuentra un patrón, devolver la respuesta original
+
 # Crear la cadena inicial
 chain = create_sql_query_chain(llm, db)
 
 # Primera ejecución
-response = chain.invoke({"question": "List the species of trees that are present in San Francisco"})
+response = chain.invoke({"question": "How many species of trees are in San Francisco?"})
 
 print("\n----------\n")
-print("List the species of trees that are present in San Francisco")
+print("How many species of trees are in San Francisco?")
 print("\n----------\n")
 print(response)
 print("\n----------\n")
+
 print("Query executed:")
 print("\n----------\n")
-
-# Función para extraer la consulta SQL
-def extract_sql_query(response):
-    sql_match = re.search(r'```sql\n(.*?)\n```', response, re.DOTALL)
-    if sql_match:
-        return sql_match.group(1).strip()
-    sql_match = re.search(r'SELECT.*?;', response, re.DOTALL | re.IGNORECASE)
-    if sql_match:
-        return sql_match.group(0).strip()
-    return None
-
-# Extraer y ejecutar la consulta SQL
 sql_query = extract_sql_query(response)
-if sql_query:
-    print("\n----------\n")
-    print("SQL Query:")
-    print(sql_query)
-    print("\n----------\n")
-    print("Query executed:")
-    print("\n----------\n")
-    print(db.run(sql_query))
-else:
-    print("No se pudo extraer una consulta SQL válida de la respuesta.")
+print(sql_query)
+print("\nResult:")
+print(db.run(sql_query))
 
 print("\n----------\n")
+print("Chain prompts:")
+print("\n----------\n")
+chain.get_prompts()[0].pretty_print()
 
 # Configurar herramientas y cadenas adicionales
 execute_query = QuerySQLDataBaseTool(db=db)
 write_query = create_sql_query_chain(llm, db)
 
 # Segunda ejecución (con query execution included)
+chain = write_query | execute_query
 response = chain.invoke({"question": "List the species of trees that are present in San Francisco"})
 
 print("\n----------\n")
 print("List the species of trees that are present in San Francisco (with query execution included)")
 print("\n----------\n")
-print(response)
+extracted_query = extract_sql_query(response)
+print("Extracted SQL Query:")
+print(extracted_query)
+print("\nQuery Result:")
+print(db.run(extracted_query))
 print("\n----------\n")
 
 # Configurar prompt personalizado y cadena final
